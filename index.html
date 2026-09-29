@@ -1,0 +1,1051 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>เกมโยงเส้นทางให้ใกล้ที่สุด (Infinite Procedural Challenge)</title>
+<!-- Tailwind CSS for modern UI design -->
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body {
+    font-family: 'Prompt', sans-serif;
+    background: linear-gradient(135deg, #e0f2fe 0%, #f0fdf4 100%);
+    min-height: 100vh;
+  }
+  
+  /* Road styles */
+  .road-base {
+    stroke: #94a3b8;
+    stroke-width: 26;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: stroke 0.3s;
+  }
+  .road-inner {
+    stroke: #cbd5e1;
+    stroke-width: 20;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .road-dash {
+    stroke: #ffffff;
+    stroke-width: 2.5;
+    stroke-dasharray: 6 8;
+    stroke-linecap: round;
+  }
+
+  /* Active path overlay */
+  .player-route {
+    stroke: #f97316;
+    stroke-width: 9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    filter: drop-shadow(0px 2px 5px rgba(249, 115, 22, 0.4));
+    transition: all 0.25s ease-out;
+  }
+
+  .solution-route {
+    stroke: #10b981;
+    stroke-width: 7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 10 10;
+    animation: dashAnim 1.4s linear infinite;
+  }
+
+  @keyframes dashAnim {
+    to {
+      stroke-dashoffset: -40;
+    }
+  }
+
+  /* Node animations */
+  .node-group {
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .node-circle {
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), fill 0.2s, stroke 0.2s, filter 0.2s;
+    transform-origin: center;
+  }
+  .node-group:hover .node-circle {
+    transform: scale(1.18);
+    filter: drop-shadow(0 4px 10px rgba(0,0,0,0.25));
+  }
+  .node-next-valid .node-circle {
+    animation: pulseRing 1.5s infinite;
+  }
+
+  @keyframes pulseRing {
+    0% { stroke: #fbbf24; stroke-width: 5; }
+    50% { stroke: #f59e0b; stroke-width: 9; }
+    100% { stroke: #fbbf24; stroke-width: 5; }
+  }
+
+  .distance-pill {
+    pointer-events: none;
+    user-select: none;
+  }
+
+  #cyclist-marker {
+    transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transform-origin: center;
+    pointer-events: none;
+  }
+
+  #confetti-canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    z-index: 100;
+  }
+</style>
+</head>
+<body class="p-3 md:p-6 text-slate-800">
+<!-- Canvas for victory confetti -->
+<canvas id="confetti-canvas"></canvas>
+
+<div class="max-w-6xl mx-auto space-y-4">
+  
+  <!-- Header Bar -->
+  <header class="flex flex-col md:flex-row items-center justify-between bg-white/95 backdrop-blur rounded-2xl p-4 shadow-sm border border-slate-100 gap-4">
+    <div class="flex items-center gap-3">
+      <div id="main-icon-badge" class="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center text-2xl font-bold shadow-inner">
+        🚲
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-xl md:text-2xl font-bold text-slate-800 tracking-tight">เกมโยงเส้นทางให้ใกล้ที่สุด</h1>
+          <span class="bg-indigo-100 text-indigo-700 text-xs px-2.5 py-0.5 rounded-full font-bold">สุ่มไม่จำกัด</span>
+        </div>
+        <p class="text-xs md:text-sm text-slate-500">คำนวณและเลือกเส้นทางที่สั้นที่สุดจากจุดเริ่มต้นสู่ปลายทาง!</p>
+      </div>
+    </div>
+    
+    <!-- Level Generator Controls -->
+    <div class="flex flex-wrap items-center gap-2">
+      <!-- Difficulty selector -->
+      <div class="flex items-center bg-slate-100 p-1 rounded-xl">
+        <button onclick="setDifficulty('easy')" id="diff-easy" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold transition bg-white text-blue-600 shadow-sm">ง่าย</button>
+        <button onclick="setDifficulty('medium')" id="diff-medium" class="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 transition">ปานกลาง</button>
+        <button onclick="setDifficulty('hard')" id="diff-hard" class="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 transition">ท้าทาย</button>
+      </div>
+
+      <!-- Generate Next Random Map Button -->
+      <button onclick="generateNewRandomMap()" class="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs md:text-sm font-bold shadow-md shadow-blue-500/20 active:scale-95 transition flex items-center gap-1.5">
+        <span>🎲 สุ่มแผนที่ใหม่</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Status & Score Cards -->
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+    <div class="bg-white rounded-2xl p-3.5 shadow-sm border border-slate-100 flex items-center gap-3">
+      <div class="p-2.5 rounded-xl bg-blue-50 text-blue-600 text-xl">📍</div>
+      <div>
+        <div class="text-xs text-slate-400 font-medium">ภารกิจปัจจุบัน</div>
+        <div id="target-summary" class="text-sm font-bold text-slate-700 truncate max-w-[130px]">บ้าน ➔ โรงเรียน</div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl p-3.5 shadow-sm border border-slate-100 flex items-center gap-3">
+      <div class="p-2.5 rounded-xl bg-amber-50 text-amber-600 text-xl">📏</div>
+      <div>
+        <div class="text-xs text-slate-400 font-medium">ระยะทางที่คุณเลือก</div>
+        <div class="text-base font-bold text-amber-600">
+          <span id="current-distance" class="text-xl">0.0</span> <span class="text-xs font-normal">กม.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl p-3.5 shadow-sm border border-slate-100 flex items-center gap-3">
+      <div class="p-2.5 rounded-xl bg-emerald-50 text-emerald-600 text-xl">🔥</div>
+      <div>
+        <div class="text-xs text-slate-400 font-medium">ชนะต่อเนื่อง (Streak)</div>
+        <div class="text-base font-bold text-emerald-600">
+          <span id="win-streak" class="text-xl">0</span> <span class="text-xs font-normal">ด่าน</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl p-3.5 shadow-sm border border-slate-100 flex items-center gap-3">
+      <div class="p-2.5 rounded-xl bg-purple-50 text-purple-600 text-xl">🎯</div>
+      <div>
+        <div class="text-xs text-slate-400 font-medium">จำนวนด่านที่ผ่าน</div>
+        <div class="text-base font-bold text-purple-600">
+          <span id="total-solved" class="text-xl">0</span> <span class="text-xs font-normal">รอบ</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Interactive Area -->
+  <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+    
+    <!-- Map Container -->
+    <div class="lg:col-span-3 bg-white rounded-2xl p-3 md:p-4 shadow-sm border border-slate-100 relative overflow-hidden flex flex-col justify-between">
+      
+      <div class="flex items-center justify-between mb-2 px-2">
+        <span class="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+          คลิกที่จุดวงกลมที่มีแสงกะพริบสีส้ม/เหลืองเพื่อก้าวถัดไป
+        </span>
+        <div class="flex items-center gap-2">
+          <button id="sound-toggle" onclick="toggleSound()" class="text-xs px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium transition flex items-center gap-1">
+            <span id="sound-icon">🔊</span> เปิดเสียง
+          </button>
+        </div>
+      </div>
+
+      <!-- SVG Map Canvas -->
+      <div class="w-full relative bg-slate-50/70 rounded-xl border border-slate-100 overflow-hidden shadow-inner">
+        <svg id="game-map" viewBox="0 0 760 460" class="w-full h-auto select-none">
+          <!-- Background Road Layers -->
+          <g id="layer-roads-base"></g>
+          <g id="layer-roads-inner"></g>
+          <g id="layer-roads-dash"></g>
+          
+          <!-- Solution Route Layer (dashed green if requested) -->
+          <polyline id="solution-polyline" class="solution-route hidden" points=""></polyline>
+
+          <!-- Player Route Layer (solid orange) -->
+          <polyline id="player-polyline" class="player-route" points=""></polyline>
+
+          <!-- Road Distance Pills/Labels -->
+          <g id="layer-road-labels"></g>
+
+          <!-- Node Points and Anchors -->
+          <g id="layer-nodes"></g>
+
+          <!-- Traveler Avatar Marker -->
+          <g id="cyclist-marker" style="display: none;">
+            <circle cx="0" cy="0" r="18" fill="#f97316" stroke="#ffffff" stroke-width="3" filter="drop-shadow(0 2px 6px rgba(0,0,0,0.3))"/>
+            <text id="vehicle-emoji" x="0" y="5" font-size="16" text-anchor="middle" dominant-baseline="middle">🚲</text>
+          </g>
+        </svg>
+      </div>
+
+      <!-- Live Path Breadcrumb Bar -->
+      <div class="mt-3 flex items-center justify-between text-xs text-slate-600 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 overflow-x-auto">
+        <div class="flex items-center gap-1.5 shrink-0">
+          <span class="font-bold text-slate-500">ลำดับเส้นทาง:</span>
+          <span id="breadcrumb-list" class="font-medium text-slate-700">🏠 รอเริ่มต้น</span>
+        </div>
+        <button onclick="undoStep()" id="undo-btn" class="shrink-0 ml-2 px-2.5 py-1 text-xs font-semibold rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 transition disabled:opacity-40 disabled:cursor-not-allowed">
+          ↩️ ย้อนกลับ 1 ก้าว
+        </button>
+      </div>
+    </div>
+
+    <!-- Action Controls & Assistant Panel -->
+    <div class="space-y-3">
+      
+      <!-- Action Controls -->
+      <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-3">
+        <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+          <span>🎮</span> แผงควบคุม
+        </h3>
+
+        <button id="btn-check" onclick="checkAnswer()" class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-sm shadow-md shadow-emerald-500/20 active:scale-[0.98] transition">
+          ✅ ตรวจคำตอบ
+        </button>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick="resetCurrentGame()" class="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs active:scale-[0.98] transition">
+            🔄 ลองเส้นใหม่
+          </button>
+          <button onclick="toggleHint()" id="btn-hint" class="py-2.5 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold text-xs active:scale-[0.98] transition">
+            💡 ดูเฉลย
+          </button>
+        </div>
+
+        <!-- Result / Feedback Box -->
+        <div id="result-box" class="p-3.5 rounded-xl bg-blue-50/60 border border-blue-100 text-xs text-slate-700 transition">
+          <div class="font-semibold text-blue-900 mb-1" id="result-title">พร้อมออกเดินทาง!</div>
+          <div id="result-desc" class="text-slate-600 leading-relaxed">
+            คลิกที่จุดเริ่มต้นบนแผนที่เพื่อเริ่มเดินทาง
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Hint Card -->
+      <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-2 text-xs">
+        <h4 class="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+          <span>🧠</span> วิธีคิดแบบอัลกอริทึม
+        </h4>
+        <ul class="space-y-1.5 text-slate-600 list-disc list-inside">
+          <li>แต่ละถนนมี <b class="text-slate-800">ตัวเลขบอกระยะทาง (กม.)</b></li>
+          <li>คำนวณบวกสะสมในใจเพื่อหาทางที่รวมกันแล้ว <b class="text-emerald-700">น้อยที่สุด</b></li>
+          <li>หากตอบถูกต่อเนื่อง สถิติสตรีค (Streak) จะเพิ่มขึ้นเรื่อยๆ!</li>
+          <li>กดปุ่ม <b class="text-blue-600">🎲 สุ่มแผนที่ใหม่</b> ได้ตลอดเวลาเพื่อสร้างด่านใหม่ไม่ซ้ำกัน</li>
+        </ul>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+<script>
+/* Simple Web Audio Synthesizer (No external sound files required) */
+let soundEnabled = true;
+let audioCtx = null;
+
+function getAudioContext() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  return audioCtx;
+}
+
+function playTone(freq, type = 'sine', duration = 0.15, vol = 0.15) {
+  if (!soundEnabled) return;
+  try {
+    const ctx = getAudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+    gain.gain.setValueAtTime(vol, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + duration);
+  } catch(e) {}
+}
+
+function playStepSound() {
+  playTone(523.25, 'triangle', 0.12, 0.2); // C5
+}
+
+function playErrorSound() {
+  playTone(220, 'sawtooth', 0.22, 0.2); // Low A3 buzz
+}
+
+function playSuccessChime() {
+  if (!soundEnabled) return;
+  const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+  notes.forEach((freq, idx) => {
+    setTimeout(() => playTone(freq, 'sine', 0.35, 0.2), idx * 110);
+  });
+}
+
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  document.getElementById('sound-icon').innerText = soundEnabled ? '🔊' : '🔇';
+  document.getElementById('sound-toggle').innerHTML = soundEnabled ? '<span>🔊</span> เปิดเสียง' : '<span>🔇</span> ปิดเสียง';
+}
+
+/* Themes configuration for varied procedural maps */
+const THEMES = [
+  { startIcon: "🏠", startName: "บ้าน", endIcon: "🏫", endName: "โรงเรียน", vehicle: "🚲" },
+  { startIcon: "⛺", startName: "แคมป์", endIcon: "🏔️", endName: "ยอดเขา", vehicle: "🚙" },
+  { startIcon: "🚉", startName: "สถานีรถไฟ", endIcon: "✈️", endName: "สนามบิน", vehicle: "🚕" },
+  { startIcon: "🏡", startName: "ฟาร์ม", endIcon: "🏪", endName: "ตลาดสด", vehicle: "🚚" },
+  { startIcon: "🏢", startName: "ออฟฟิศ", endIcon: "🎡", endName: "สวนสนุก", vehicle: "🛴" },
+  { startIcon: "⛵", startName: "ท่าเรือ", endIcon: "🏖️", endName: "เกาะสวรรค์", vehicle: "🚤" }
+];
+
+let currentDifficulty = 'easy'; // 'easy', 'medium', 'hard'
+let currentLevel = null;
+let userPath = [];
+let userTotalDistance = 0;
+let isHintVisible = false;
+let winStreak = 0;
+let totalSolved = 0;
+
+/* Procedural Graph Generator */
+function generateRandomLevel(difficulty) {
+  let layerCounts;
+  if (difficulty === 'easy') {
+    // 3 intermediate layers: 1 start + ~5 intermediate + 1 end
+    layerCounts = [2, 2, 2];
+  } else if (difficulty === 'medium') {
+    // 4 intermediate layers
+    layerCounts = [2, 3, 2, 2];
+  } else {
+    // hard: 4 to 5 layers with more branching
+    layerCounts = [2, 3, 3, 2];
+  }
+
+  const theme = THEMES[Math.floor(Math.random() * THEMES.length)];
+  const totalLayers = layerCounts.length + 2; // + start and end layers
+  const canvasWidth = 760;
+  const canvasHeight = 460;
+  const marginX = 80;
+  const xStep = (canvasWidth - marginX * 2) / (totalLayers - 1);
+
+  const nodes = {};
+  const edges = [];
+  const layerNodeIds = [];
+
+  // Start Node (Layer 0)
+  nodes["start"] = {
+    x: marginX,
+    y: Math.floor(canvasHeight / 2) + Math.floor((Math.random() - 0.5) * 60),
+    label: theme.startName,
+    icon: theme.startIcon,
+    type: "start"
+  };
+  layerNodeIds.push(["start"]);
+
+  // Intermediate Layers
+  let letterCharCode = 65; // 'A'
+  for (let l = 0; l < layerCounts.length; l++) {
+    const count = layerCounts[l];
+    const layerIds = [];
+    const layerX = Math.round(marginX + (l + 1) * xStep + (Math.random() - 0.5) * 25);
+    const ySpacing = (canvasHeight - 160) / (count + 1);
+
+    for (let i = 0; i < count; i++) {
+      const id = String.fromCharCode(letterCharCode++);
+      const layerY = Math.round(80 + ySpacing * (i + 1) + (Math.random() - 0.5) * 35);
+      nodes[id] = {
+        x: layerX,
+        y: layerY,
+        label: id,
+        icon: "",
+        type: "junction"
+      };
+      layerIds.push(id);
+    }
+    layerNodeIds.push(layerIds);
+  }
+
+  // End Node (Last Layer)
+  nodes["end"] = {
+    x: canvasWidth - marginX,
+    y: Math.floor(canvasHeight / 2) + Math.floor((Math.random() - 0.5) * 60),
+    label: theme.endName,
+    icon: theme.endIcon,
+    type: "end"
+  };
+  layerNodeIds.push(["end"]);
+
+  // Connect layers forward to guarantee connectivity and multiple choices
+  const edgeSet = new Set();
+  function addEdge(u, v) {
+    if (u === v) return;
+    const key = [u, v].sort().join("-");
+    if (edgeSet.has(key)) return;
+    edgeSet.add(key);
+
+    // Calculate distance with some geometric proportion + randomness
+    const p1 = nodes[u];
+    const p2 = nodes[v];
+    const dx = p1.x - p2.x;
+    const dy = p1.y - p2.y;
+    const euclidean = Math.sqrt(dx * dx + dy * dy);
+    // Base distance in km scaled roughly
+    const baseDist = (euclidean / 130) + (Math.random() * 0.9);
+    const dist = Math.max(1.0, Math.round(baseDist * 10) / 10);
+
+    edges.push({ u, v, dist });
+  }
+
+  // Guarantee every node in layer l connects to at least one node in layer l+1
+  for (let l = 0; l < layerNodeIds.length - 1; l++) {
+    const currentLayer = layerNodeIds[l];
+    const nextLayer = layerNodeIds[l + 1];
+
+    // Every node in current layer connects to at least 1 next node
+    currentLayer.forEach(u => {
+      const target = nextLayer[Math.floor(Math.random() * nextLayer.length)];
+      addEdge(u, target);
+    });
+
+    // Every node in next layer has at least 1 incoming edge
+    nextLayer.forEach(v => {
+      const source = currentLayer[Math.floor(Math.random() * currentLayer.length)];
+      addEdge(source, v);
+    });
+
+    // Add extra branch connections for alternative choices
+    if (currentLayer.length > 1 && nextLayer.length > 1) {
+      addEdge(currentLayer[0], nextLayer[nextLayer.length - 1]);
+      addEdge(currentLayer[currentLayer.length - 1], nextLayer[0]);
+    }
+
+    // Occasional intra-layer connection (if hard difficulty)
+    if (difficulty === 'hard' && currentLayer.length >= 2 && Math.random() > 0.4) {
+      addEdge(currentLayer[0], currentLayer[1]);
+    }
+  }
+
+  return {
+    theme,
+    startId: "start",
+    endId: "end",
+    startName: `${theme.startIcon} ${theme.startName}`,
+    endName: `${theme.endIcon} ${theme.endName}`,
+    vehicle: theme.vehicle,
+    nodes,
+    edges
+  };
+}
+
+// Calculate true shortest path using Dijkstra algorithm
+function computeShortestPath(level) {
+  const distances = {};
+  const previous = {};
+  const unvisited = new Set(Object.keys(level.nodes));
+
+  Object.keys(level.nodes).forEach(node => {
+    distances[node] = Infinity;
+    previous[node] = null;
+  });
+
+  distances[level.startId] = 0;
+
+  while (unvisited.size > 0) {
+    let closestNode = null;
+    let minDistance = Infinity;
+
+    unvisited.forEach(node => {
+      if (distances[node] < minDistance) {
+        minDistance = distances[node];
+        closestNode = node;
+      }
+    });
+
+    if (closestNode === null || minDistance === Infinity) break;
+    if (closestNode === level.endId) break;
+
+    unvisited.delete(closestNode);
+
+    // Neighbors
+    const neighbors = getNeighbors(level, closestNode);
+    neighbors.forEach(({ id: neighborId, dist }) => {
+      if (unvisited.has(neighborId)) {
+        const alt = distances[closestNode] + dist;
+        if (alt < distances[neighborId]) {
+          distances[neighborId] = alt;
+          previous[neighborId] = closestNode;
+        }
+      }
+    });
+  }
+
+  // Reconstruct path
+  const path = [];
+  let curr = level.endId;
+  while (curr) {
+    path.unshift(curr);
+    curr = previous[curr];
+  }
+
+  return {
+    path: path[0] === level.startId ? path : [],
+    distance: Math.round(distances[level.endId] * 10) / 10
+  };
+}
+
+function getNeighbors(level, nodeId) {
+  const neighbors = [];
+  level.edges.forEach(edge => {
+    if (edge.u === nodeId) neighbors.push({ id: edge.v, dist: edge.dist });
+    else if (edge.v === nodeId) neighbors.push({ id: edge.u, dist: edge.dist });
+  });
+  return neighbors;
+}
+
+function getEdgeWeight(level, u, v) {
+  const edge = level.edges.find(e => (e.u === u && e.v === v) || (e.u === v && e.v === u));
+  return edge ? edge.dist : null;
+}
+
+function renderMap() {
+  const level = currentLevel;
+  const layerRoadsBase = document.getElementById("layer-roads-base");
+  const layerRoadsInner = document.getElementById("layer-roads-inner");
+  const layerRoadsDash = document.getElementById("layer-roads-dash");
+  const layerRoadLabels = document.getElementById("layer-road-labels");
+  const layerNodes = document.getElementById("layer-nodes");
+
+  layerRoadsBase.innerHTML = "";
+  layerRoadsInner.innerHTML = "";
+  layerRoadsDash.innerHTML = "";
+  layerRoadLabels.innerHTML = "";
+  layerNodes.innerHTML = "";
+
+  // Draw Roads
+  level.edges.forEach(edge => {
+    const p1 = level.nodes[edge.u];
+    const p2 = level.nodes[edge.v];
+    const pathD = `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y}`;
+
+    // Base road
+    const baseP = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    baseP.setAttribute("class", "road-base");
+    baseP.setAttribute("d", pathD);
+    layerRoadsBase.appendChild(baseP);
+
+    // Inner asphalt
+    const innerP = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    innerP.setAttribute("class", "road-inner");
+    innerP.setAttribute("d", pathD);
+    layerRoadsInner.appendChild(innerP);
+
+    // Lane dashes
+    const dashP = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    dashP.setAttribute("class", "road-dash");
+    dashP.setAttribute("d", pathD);
+    layerRoadsDash.appendChild(dashP);
+
+    // Road Distance Badge (Pill)
+    const midX = (p1.x + p2.x) / 2;
+    const midY = (p1.y + p2.y) / 2;
+
+    const gBadge = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    gBadge.setAttribute("class", "distance-pill");
+
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("x", midX - 25);
+    rect.setAttribute("y", midY - 12);
+    rect.setAttribute("width", "50");
+    rect.setAttribute("height", "24");
+    rect.setAttribute("rx", "12");
+    rect.setAttribute("fill", "#1e293b");
+    rect.setAttribute("stroke", "#ffffff");
+    rect.setAttribute("stroke-width", "2");
+    rect.setAttribute("filter", "drop-shadow(0 2px 4px rgba(0,0,0,0.15))");
+
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("x", midX);
+    text.setAttribute("y", midY + 4);
+    text.setAttribute("text-anchor", "middle");
+    text.setAttribute("fill", "#f8fafc");
+    text.setAttribute("font-size", "11");
+    text.setAttribute("font-weight", "bold");
+    text.textContent = `${edge.dist.toFixed(1)} km`;
+
+    gBadge.appendChild(rect);
+    gBadge.appendChild(text);
+    layerRoadLabels.appendChild(gBadge);
+  });
+
+  // Render Nodes
+  Object.keys(level.nodes).forEach(id => {
+    const node = level.nodes[id];
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("class", "node-group");
+    g.setAttribute("data-id", id);
+    g.id = `node-${id}`;
+
+    // Node Circle
+    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    circle.setAttribute("class", "node-circle");
+    circle.setAttribute("cx", node.x);
+    circle.setAttribute("cy", node.y);
+
+    let radius = 22;
+    let fillColor = "#3b82f6"; // Blue for junction
+
+    if (node.type === "start") {
+      radius = 28;
+      fillColor = "#10b981"; // Emerald
+    } else if (node.type === "end") {
+      radius = 29;
+      fillColor = "#6366f1"; // Indigo
+    }
+
+    circle.setAttribute("r", radius);
+    circle.setAttribute("fill", fillColor);
+    circle.setAttribute("stroke", "#ffffff");
+    circle.setAttribute("stroke-width", "3.5");
+    circle.setAttribute("filter", "drop-shadow(0 3px 6px rgba(0,0,0,0.2))");
+
+    g.appendChild(circle);
+
+    // Node Icon or Letter Text
+    const textIcon = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    textIcon.setAttribute("x", node.x);
+    textIcon.setAttribute("y", node.y + (node.icon ? 6 : 5));
+    textIcon.setAttribute("text-anchor", "middle");
+    textIcon.setAttribute("fill", "#ffffff");
+    textIcon.setAttribute("font-size", node.icon ? "18" : "15");
+    textIcon.setAttribute("font-weight", "700");
+    textIcon.setAttribute("pointer-events", "none");
+    textIcon.textContent = node.icon || node.label;
+    g.appendChild(textIcon);
+
+    // Below Text Label for Start/End
+    if (node.type === "start" || node.type === "end") {
+      const textSub = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      textSub.setAttribute("x", node.x);
+      textSub.setAttribute("y", node.y + 45);
+      textSub.setAttribute("text-anchor", "middle");
+      textSub.setAttribute("fill", "#334155");
+      textSub.setAttribute("font-size", "13");
+      textSub.setAttribute("font-weight", "600");
+      textSub.setAttribute("pointer-events", "none");
+      textSub.textContent = node.label;
+      g.appendChild(textSub);
+    }
+
+    // Click event
+    g.addEventListener("click", () => handleNodeClick(id));
+    layerNodes.appendChild(g);
+  });
+
+  updateHighlights();
+}
+
+function handleNodeClick(id) {
+  const level = currentLevel;
+
+  // 1. Initial Start Node selection
+  if (userPath.length === 0) {
+    if (id !== level.startId) {
+      playErrorSound();
+      showFeedback("⚠️ ต้องเริ่มจากจุดต้นทาง", `กรุณาคลิกเลือกที่จุด ${level.startName} ก่อนครับ`, "amber");
+      return;
+    }
+    userPath.push(id);
+    userTotalDistance = 0;
+    playStepSound();
+    updateUI();
+    showFeedback("🚀 เริ่มต้นการเดินทางแล้ว!", "เลือกจุดเชื่อมต่อถัดไปที่มีแสงกะพริบสีส้ม", "blue");
+    return;
+  }
+
+  const current = userPath[userPath.length - 1];
+
+  // 2. Clicked same node
+  if (id === current) return;
+
+  // 3. Already reached end
+  if (current === level.endId) {
+    showFeedback("🏁 ถึงที่หมายแล้ว!", "คุณถึงปลายทางเรียบร้อยแล้ว กดปุ่ม “ตรวจคำตอบ” ได้เลยครับ", "emerald");
+    return;
+  }
+
+  // 4. Check if connected
+  const weight = getEdgeWeight(level, current, id);
+  if (weight === null) {
+    playErrorSound();
+    showFeedback("❌ ไม่มีเส้นทางเชื่อมต่อ", `ไม่มีถนนตรงจากจุด ${getNodeName(current)} ไปยังจุด ${getNodeName(id)}`, "red");
+    return;
+  }
+
+  // 5. Prevent cycle
+  if (userPath.includes(id)) {
+    playErrorSound();
+    showFeedback("⚠️ วนกลับจุดเดิม", `จุด ${getNodeName(id)} ถูกเลือกไปแล้ว ลองเลือกจุดอื่นนะครับ`, "amber");
+    return;
+  }
+
+  // Valid move
+  userPath.push(id);
+  userTotalDistance += weight;
+  playStepSound();
+  updateUI();
+
+  if (id === level.endId) {
+    showFeedback("🎉 เดินทางถึงจุดหมายแล้ว!", "กดปุ่ม <b>“ตรวจคำตอบ”</b> ด้านขวาเพื่อดูว่าได้ระยะทางสั้นที่สุดหรือไม่!", "emerald");
+  } else {
+    showFeedback("🚲 กำลังเดินทาง...", `มาถึงจุด ${getNodeName(id)} แล้ว (รวม ${userTotalDistance.toFixed(1)} กม.) ไปต่อเลย!`, "blue");
+  }
+}
+
+function getNodeName(id) {
+  const node = currentLevel.nodes[id];
+  return node ? (node.icon ? `${node.icon} ${node.label}` : node.label) : id;
+}
+
+function updateUI() {
+  const level = currentLevel;
+  
+  // Update player polyline
+  const points = userPath.map(id => {
+    const n = level.nodes[id];
+    return `${n.x},${n.y}`;
+  }).join(" ");
+  document.getElementById("player-polyline").setAttribute("points", points);
+
+  // Update Distance Display
+  document.getElementById("current-distance").innerText = userTotalDistance.toFixed(1);
+
+  // Update Breadcrumb
+  const breadcrumbEl = document.getElementById("breadcrumb-list");
+  if (userPath.length === 0) {
+    breadcrumbEl.innerHTML = `<span>รอเริ่มที่ ${level.startName}</span>`;
+  } else {
+    breadcrumbEl.innerHTML = userPath.map((id, idx) => {
+      const isLast = idx === userPath.length - 1;
+      return `<span class="${isLast ? 'text-amber-600 font-bold' : 'text-slate-700'}">${getNodeName(id)}</span>`;
+    }).join(" <span class='text-slate-400'>➔</span> ");
+  }
+
+  // Update Undo Button state
+  document.getElementById("undo-btn").disabled = (userPath.length <= 1);
+
+  // Update traveler avatar
+  const marker = document.getElementById("cyclist-marker");
+  if (userPath.length > 0) {
+    const lastNode = level.nodes[userPath[userPath.length - 1]];
+    marker.style.display = "block";
+    marker.setAttribute("transform", `translate(${lastNode.x}, ${lastNode.y})`);
+  } else {
+    marker.style.display = "none";
+  }
+
+  updateHighlights();
+}
+
+function updateHighlights() {
+  const level = currentLevel;
+  const allNodes = document.querySelectorAll(".node-group");
+  allNodes.forEach(el => el.classList.remove("node-next-valid"));
+
+  if (userPath.length === 0) {
+    const startEl = document.getElementById(`node-${level.startId}`);
+    if (startEl) startEl.classList.add("node-next-valid");
+  } else {
+    const current = userPath[userPath.length - 1];
+    if (current !== level.endId) {
+      const neighbors = getNeighbors(level, current);
+      neighbors.forEach(n => {
+        if (!userPath.includes(n.id)) {
+          const el = document.getElementById(`node-${n.id}`);
+          if (el) el.classList.add("node-next-valid");
+        }
+      });
+    }
+  }
+}
+
+function undoStep() {
+  if (userPath.length <= 1) return;
+  const level = currentLevel;
+  const removed = userPath.pop();
+  const current = userPath[userPath.length - 1];
+  const weight = getEdgeWeight(level, current, removed);
+  if (weight) userTotalDistance = Math.max(0, userTotalDistance - weight);
+  
+  playStepSound();
+  updateUI();
+  showFeedback("↩️ ย้อนกลับ 1 ก้าว", `ย้อนกลับมาที่จุด ${getNodeName(current)} เรียบร้อยแล้ว`, "blue");
+}
+
+function resetCurrentGame() {
+  userPath = [];
+  userTotalDistance = 0;
+  hideHint();
+  updateUI();
+  showFeedback("🔄 ล้างเส้นทางแล้ว", `คลิกที่ ${currentLevel.startName} เพื่อเริ่มโยงเส้นทางใหม่`, "blue");
+}
+
+function checkAnswer() {
+  const level = currentLevel;
+  if (userPath.length === 0 || userPath[userPath.length - 1] !== level.endId) {
+    playErrorSound();
+    showFeedback("❗ ยังไม่ถึงปลายทาง", `คุณต้องเดินทางไปให้ถึง ${level.endName} ก่อนตรวจคำตอบนะครับ`, "amber");
+    return;
+  }
+
+  const optimal = computeShortestPath(level);
+  const diff = Math.abs(userTotalDistance - optimal.distance);
+
+  if (diff < 0.05) {
+    // Correct Shortest Path!
+    playSuccessChime();
+    triggerConfetti();
+
+    winStreak++;
+    totalSolved++;
+    document.getElementById("win-streak").innerText = winStreak;
+    document.getElementById("total-solved").innerText = totalSolved;
+
+    showFeedback(
+      `🎉 ยอดเยี่ยมที่สุด! ถูกต้องสมบูรณ์แบบ! (+1 สตรีค: ${winStreak})`,
+      `คุณค้นพบเส้นทางที่สั้นที่สุดด้วยระยะทาง <b>${userTotalDistance.toFixed(1)} กม.</b> (${optimal.path.map(id => getNodeName(id)).join(" ➔ ")})! เก่งมากครับ กด <b>“🎲 สุ่มแผนที่ใหม่”</b> เพื่อลุยด่านต่อไป!`,
+      "emerald"
+    );
+  } else {
+    playErrorSound();
+    winStreak = 0;
+    document.getElementById("win-streak").innerText = winStreak;
+    showFeedback(
+      "ยังไม่ใช่เส้นทางที่สั้นที่สุดนะ 🤔",
+      `เส้นทางที่คุณเลือกยาว <b>${userTotalDistance.toFixed(1)} กม.</b> แต่ยังมีเส้นทางที่สั้นกว่านี้! (สั้นที่สุดคือ ${optimal.distance.toFixed(1)} กม.) ลองกด "ลองเส้นใหม่" หรือเปิด "ดูเฉลย" เพื่อศึกษาดูนะ`,
+      "amber"
+    );
+  }
+}
+
+function toggleHint() {
+  if (isHintVisible) {
+    hideHint();
+  } else {
+    showHint();
+  }
+}
+
+function showHint() {
+  const level = currentLevel;
+  const optimal = computeShortestPath(level);
+  const points = optimal.path.map(id => {
+    const n = level.nodes[id];
+    return `${n.x},${n.y}`;
+  }).join(" ");
+
+  const solPoly = document.getElementById("solution-polyline");
+  solPoly.setAttribute("points", points);
+  solPoly.classList.remove("hidden");
+
+  isHintVisible = true;
+  document.getElementById("btn-hint").classList.add("bg-emerald-100", "text-emerald-800");
+  document.getElementById("btn-hint").innerText = "🙈 ซ่อนเฉลย";
+
+  showFeedback(
+    "💡 แสดงเส้นทางเฉลย (สีเขียวประ)",
+    `เส้นทางที่สั้นที่สุดคือ <b>${optimal.path.map(id => getNodeName(id)).join(" ➔ ")}</b> รวมระยะทางเพียง <b>${optimal.distance.toFixed(1)} กม.</b>`,
+    "emerald"
+  );
+}
+
+function hideHint() {
+  const solPoly = document.getElementById("solution-polyline");
+  solPoly.classList.add("hidden");
+  isHintVisible = false;
+  document.getElementById("btn-hint").classList.remove("bg-emerald-100", "text-emerald-800");
+  document.getElementById("btn-hint").innerText = "💡 ดูเฉลย";
+}
+
+function showFeedback(title, desc, color) {
+  const box = document.getElementById("result-box");
+  const titleEl = document.getElementById("result-title");
+  const descEl = document.getElementById("result-desc");
+
+  titleEl.innerHTML = title;
+  descEl.innerHTML = desc;
+
+  box.className = "p-3.5 rounded-xl border text-xs transition duration-200";
+  if (color === "emerald") {
+    box.classList.add("bg-emerald-50", "border-emerald-200", "text-emerald-950");
+  } else if (color === "amber") {
+    box.classList.add("bg-amber-50", "border-amber-200", "text-amber-950");
+  } else if (color === "red") {
+    box.classList.add("bg-rose-50", "border-rose-200", "text-rose-950");
+  } else {
+    box.classList.add("bg-blue-50/70", "border-blue-100", "text-slate-800");
+  }
+}
+
+function setDifficulty(diff) {
+  currentDifficulty = diff;
+  ['easy', 'medium', 'hard'].forEach(d => {
+    const btn = document.getElementById(`diff-${d}`);
+    if (d === diff) {
+      btn.className = "px-2.5 py-1.5 rounded-lg text-xs font-semibold transition bg-white text-blue-600 shadow-sm";
+    } else {
+      btn.className = "px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 transition";
+    }
+  });
+  generateNewRandomMap();
+}
+
+function generateNewRandomMap() {
+  userPath = [];
+  userTotalDistance = 0;
+  hideHint();
+
+  // Retry generation if graph has no reachable path (safety check)
+  let level = null;
+  let optimal = null;
+  for (let attempt = 0; attempt < 25; attempt++) {
+    level = generateRandomLevel(currentDifficulty);
+    optimal = computeShortestPath(level);
+    if (optimal.path.length >= 3 && optimal.distance > 0) {
+      break;
+    }
+  }
+
+  currentLevel = level;
+
+  // Update theme icons and UI badges
+  document.getElementById("main-icon-badge").innerText = level.vehicle;
+  document.getElementById("vehicle-emoji").textContent = level.vehicle;
+  document.getElementById("target-summary").innerText = `${level.startName} ➔ ${level.endName}`;
+
+  renderMap();
+  updateUI();
+  showFeedback(`🎲 สร้างแผนที่ใหม่สำเร็จ!`, `ภารกิจ: เดินทางจาก <b>${level.startName}</b> ไปยัง <b>${level.endName}</b> ด้วยระยะทางรวมที่สั้นที่สุด`, "blue");
+}
+
+function triggerConfetti() {
+  const canvas = document.getElementById("confetti-canvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const particles = [];
+  const colors = ["#f59e0b", "#10b981", "#3b82f6", "#ec4899", "#8b5cf6", "#e11d48"];
+
+  for (let i = 0; i < 90; i++) {
+    particles.push({
+      x: canvas.width / 2 + (Math.random() - 0.5) * 220,
+      y: canvas.height * 0.35 + (Math.random() - 0.5) * 60,
+      vx: (Math.random() - 0.5) * 12,
+      vy: -Math.random() * 10 - 4,
+      size: Math.random() * 8 + 4,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      rotation: Math.random() * 360,
+      rotSpeed: (Math.random() - 0.5) * 10,
+      gravity: 0.28,
+      alpha: 1
+    });
+  }
+
+  let animId;
+  function update() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let alive = false;
+
+    particles.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += p.gravity;
+      p.rotation += p.rotSpeed;
+      p.alpha -= 0.009;
+
+      if (p.alpha > 0) {
+        alive = true;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate((p.rotation * Math.PI) / 180);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.max(0, p.alpha);
+        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+        ctx.restore();
+      }
+    });
+
+    if (alive) {
+      animId = requestAnimationFrame(update);
+    } else {
+      cancelAnimationFrame(animId);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  update();
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+  generateNewRandomMap();
+});
+</script>
+</body>
+</html>
